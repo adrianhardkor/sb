@@ -32,8 +32,7 @@ node() {
     }
     stage("BDD-Behave") {
         sh "wait 30"
-    }"
-}
+    }
     catch(e) {                           
         // If there was an exception thrown, the build failed
         currentBuild.result = "FAILED"
