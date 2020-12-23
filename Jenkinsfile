@@ -33,13 +33,7 @@ node() {
     stage("BDD-Behave") {
         sh "wait 30"
     }
-    catch(e) {                           
-        // If there was an exception thrown, the build failed
-        currentBuild.result = "FAILED"
-        throw e
-    } finally {
-        // Success or failure, always send notifications
-        echo "I AM HERE"
+    stage("NOTIFY Slack") {
         notifyBuild(currentBuild.result)
     }
 }
