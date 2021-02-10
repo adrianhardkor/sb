@@ -11,6 +11,7 @@ node() {
             cleanWs()
             env.WORKSPACE_LOCAL = sh(returnStdout: true, script: 'pwd').trim()
             passthruString = sh(script: "printenv", returnStdout: true)
+            echo "${passthruString}"
             passthruString = passthruString.replaceAll('\n',' jenkins_')       
             env.BUILD_TIME = "${BUILD_TIMESTAMP}"
             def HUDSON_URL = "${env.HUDSON_URL}"
