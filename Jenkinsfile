@@ -1,99 +1,46 @@
 node() {
-
-    def repoURL = "https://github.com/adrianhardkor/sb.git"
-
-    def STC_INSTALL = "/opt/STC_CLIENT/Spirent_TestCenter_5.16/Spirent_TestCenter_Application_Linux64Client/"
     def os = System.properties['os.name'].toLowerCase()
     try {
         notifyBuild('STARTED')
+        def passthruString = sh(script: "printenv", returnStdout: true)
+        passthruString = passthruString.replaceAll('\n',' ').trim()
+        def paramsString1 = params.toString().replaceAll("[\\[\\](){}]","")
+        paramsString = paramsString1.replaceAll(', ',' ')
+        def paramsStringXray = formatXray(paramsString1, ', ')
+        def HUDSON_URL = "${env.HUDSON_URL}"
+        def SERVER_JENKINS = ""
+        if (HUDSON_URL.contains("10.88.48.21")) {
+            SERVER_JENKINS = "WOPR-SB"
+        } else {
+            SERVER_JENKINS = "WOPR-PROD-JENKINS"
+        }
         stage("Prepare Workspace") {
             echo "*** Prepare Workspace ***"
             cleanWs()
+            // sh "ls -l"
             env.WORKSPACE_LOCAL = sh(returnStdout: true, script: 'pwd').trim()
-            passthruString = sh(script: "printenv", returnStdout: true)
-            echo "${scm}"
-            passthruString = passthruString.replaceAll('\n',' jenkins_')       
             env.BUILD_TIME = "${BUILD_TIMESTAMP}"
-            def HUDSON_URL = "${env.HUDSON_URL}"
             echo "Workspace set to:" + env.WORKSPACE_LOCAL
             echo "Build time:" + env.BUILD_TIME
         }
         stage('Checkout Self') {
-           echo "\n\n\n GIT CLONE STAGE"
+            echo "\n\n GIT ENTIRE REPO"
+            checkout scm
+            // sh "ls -l"
+        }
+        stage('Checkout shared_libs') {
+            echo " ** REPO SHARED LIBRARIES FOR ALL GIT-ARC PROJECTS ** "
             sh """
-                rm -rf *
-                ls -l
+                mkdir lib
+                cd lib/
+                git clone ${GIT_SHARED_LIB}
+                cd ..
+                ls -l ./lib/shared_libs/
             """
-            def branches = "${scm.branches}"
-            if (branches.contains("master")) {
-                git "${repoURL}"
-            }
-            if (branches.contains("main")) {
-                git branch: "main", url: "${repoURL}"
-            }
-        }
-        stage("SB") {
-            if (HUDSON_URL.contains("10.88.48.21")) {
-                echo "\n\n\nBDD-Behave FOR SANDBOX"
-                sh """
-                    pwd
-                    ls -l
-                """
-                try {
-                   sh """
-                        export STC_PRIVATE_INSTALL_DIR=${STC_INSTALL}
-                        cd $env.WORKSPACE_LOCAL
-                        /var/lib/jenkins/.pyenv/shims/behave -f cucumber -o reports/cucumber.json --junit --format=json -o target/behave.json --junit
-                   """
-                } catch (error) {
-                    echo "\n\n\n FAILURE FOUND -- CONTINUING TO XRAY-IMPORT"
-                } finally {
-                    echo "*** JUNIT ***"
-                    junit skipPublishingChecks: true, allowEmptyResults: true, keepLongStdio: true, testResults: 'reports/*.xml'
-                } 
-            }
-        }
-        stage ('Cucumber Reports') {
-            cucumber buildStatus: "UNSTABLE",
-            fileIncludePattern: "**/cucumber.json",
-            jsonReportDirectory: 'reports'
-        }
-        stage('Import results to Xray') {
-            echo "*** Import Results to XRAY ***"
-
-            def description = "[STC Test Report|${env.BUILD_URL}/cucumber-html-reports/overview-features.html]"
-            def labels = '["regression","automated_regression"]'
-            def environment = "DEV"
-            def testExecutionFieldId = 10552
-            def testEnvironmentFieldName = "customfield_10372"
-            def projectKey = "XT"
-            def projectId = 10606
-            def xrayConnectorId = "${xrayConnectorId}"
-            def info = '''{
-                "fields": {
-                    "project": {
-                        "id": "''' + projectId + '''"
-                    },
-                    "labels":''' + labels + ''',
-                    "description":"''' + description + '''",
-                    "summary": "Testing Jenkins - Automated Regression Execution @ ''' + env.BUILD_TIME + ' ' + environment + ''' " ,
-                    "issuetype": {
-                        "id": "''' + testExecutionFieldId + '''"
-                    }
-                }
-            }'''
-
-            echo info
-
-            step([$class: 'XrayImportBuilder', 
-            endpointName: '/cucumber/multipart', 
-            importFilePath: 'reports/cucumber.json', 
-            importInfo: info, 
-            inputInfoSwitcher: 'fileContent', 
-            serverInstance: xrayConnectorId])
+            echo "\n\n"
         }
     }
-    catch(e) {                           
+    catch(e) {
         // If there was an exception thrown, the build failed
         currentBuild.result = "FAILED"
         throw e
@@ -101,12 +48,20 @@ node() {
         // Success or failure, always send notifications
         echo "I AM HERE"
         notifyBuild(currentBuild.result)
+        sendEmail(currentBuild.result)
     }
+}
+def formatXray(input_string, String delimiter = "\n") {
+    result = ""
+    for(line in input_string.split(delimiter)) {
+        result = result.replaceAll("\t","    ") + "\\n" + line
+        // single to double / for all
+    }
+    return result
 }
 def notifyBuild(String buildStatus = 'STARTED') {
     // build status of null means successful
     buildStatus =  buildStatus ?: 'SUCCESSFUL'
-
     // Default values
     def colorName = 'RED'
     def colorCode = '#FF0000'
@@ -114,7 +69,6 @@ def notifyBuild(String buildStatus = 'STARTED') {
     def summary = "${subject} (${env.BUILD_URL})"
     def details = """<p>STARTED: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]':</p>
       <p>Check console output at &QUOT;<a href='${env.BUILD_URL}'>${env.JOB_NAME} [${env.BUILD_NUMBER}]</a>&QUOT;</p>"""
-
       // Override default values based on build status
       if (buildStatus == 'STARTED') {
         color = 'BLUE'
@@ -133,7 +87,6 @@ def notifyBuild(String buildStatus = 'STARTED') {
         colorCode = '#FF0000'
         msg = "Build: ${env.JOB_NAME} had an issue ${env.BUILD_URL}/console"
       }
-
     // Send notifications
     slackSend baseUrl: 'https://hooks.slack.com/services/', 
     channel: 'wopr-jenkins-test', 
@@ -142,4 +95,20 @@ def notifyBuild(String buildStatus = 'STARTED') {
     teamDomain: 'https://wow-technology.slack.com', 
     tokenCredentialId: 'Slack-Token', 
     username: 'JenkinsAutomation'
+}
+def sendEmail(String buildStatus = 'STARTED') {
+    // build status of null means successful
+    // if buildStatus is not STARTED and mailRecipients is a parameter
+    buildStatus =  buildStatus ?: 'SUCCESSFUL'
+    if (buildStatus != 'STARTED') {
+        if (params.toString().contains("mailRecipients")) {
+            def jobName = currentBuild.fullDisplayName
+            emailext body: '''${SCRIPT, template="groovy-html.template"}''',
+                mimeType: 'text/html',
+                subject: "[Jenkins] ${jobName}",
+                to: "${params.mailRecipients}",
+                replyTo: "${params.mailRecipients}",
+                recipientProviders: [[$class: 'CulpritsRecipientProvider']]
+        }
+    }
 }
