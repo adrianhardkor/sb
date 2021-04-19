@@ -17,27 +17,32 @@ node() {
         stage("Prepare Workspace") {
             echo "*** Prepare Workspace ***"
             cleanWs()
-            // sh "ls -l"
+            // sh "ls -l; pwd"
             env.WORKSPACE_LOCAL = sh(returnStdout: true, script: 'pwd').trim()
             env.BUILD_TIME = "${BUILD_TIMESTAMP}"
             echo "Workspace set to:" + env.WORKSPACE_LOCAL
             echo "Build time:" + env.BUILD_TIME
         }
         stage('Checkout Self') {
-            echo "\n\n GIT ENTIRE REPO"
+            echo "GIT ENTIRE REPO"
             checkout scm
-            // sh "ls -l"
+            sh "ls -l; ls -l ./lib/"
         }
         stage('Checkout shared_libs') {
             echo " ** REPO SHARED LIBRARIES FOR ALL GIT-ARC PROJECTS ** "
             sh """
-                mkdir lib
-                cd lib/
+                cd lib
                 git clone ${GIT_SHARED_LIB}
                 cd ..
-                ls -l ./lib/shared_libs/
             """
-            echo "\n\n"
+        }
+        stage("INVENTORY SYNC Py3") {
+            def inv_sync_output = sh(script: "python3 ./lib/shared_libs/loggerJenkins.py BUILD_TAG=${env.BUILD_TAG}  data=Test_For_Navid 2>&1", returnStdout: true)
+            // env.inv_sync_output_xray = formatXray(inv_sync_output, '\n')
+            echo "${inv_sync_output}"
+        }
+        stage("scm_checking") {
+            // scm_checkin()
         }
     }
     catch(e) {
@@ -111,4 +116,11 @@ def sendEmail(String buildStatus = 'STARTED') {
                 recipientProviders: [[$class: 'CulpritsRecipientProvider']]
         }
     }
+}
+def scm_checkin() {
+    def branch = scm.branches[0].name
+    def scm_user = "${scm.userRemoteConfigs}"
+    def scm_branch = scm_user.split(" ")[2] + '  HEAD:' + branch.split("/")[1]
+    def inv_sync_output = sh(script: "git config credential.helper store; git add .; git commit -m ${env.BUILD_TAG}; git push ${scm_branch}", returnStdout: true)
+    echo "${inv_sync_output}"
 }
